@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # dsh-telegram-channel manager (install / start / stop / status)
-# curl -fsSL https://raw.githubusercontent.com/hi-wenw/dsh-telegram-channel/master/scripts/install.sh | bash
+# curl -fsSL https://raw.githubusercontent.com/zhang0098/dsh-telegram-channel/master/scripts/install.sh | bash
 set -euo pipefail
 
 PROFILE_NAME="${DSH_PROFILE:-web}"
-SOURCE="${DSH_TELEGRAM_SOURCE:-github:hi-wenw/dsh-telegram-channel}"
+SOURCE="${DSH_TELEGRAM_SOURCE:-github:zhang0098/dsh-telegram-channel}"
 TOKEN="${DSH_TELEGRAM_TOKEN:-}"
 USER_ID="${DSH_TELEGRAM_ALLOWED_USER_IDS:-}"
 PORT="${DSH_WEB_PORT:-3080}"
@@ -71,7 +71,7 @@ autoInstallPeers: false
 
 allowBuilds:
   dsh-telegram-channel: true
-  'dsh-telegram-channel@git+https://github.com/hi-wenw/dsh-telegram-channel.git': true
+  'dsh-telegram-channel@git+https://github.com/zhang0098/dsh-telegram-channel.git': true
 EOF
     echo "Created $ws (allowBuilds)"
     return
@@ -86,7 +86,7 @@ EOF
 
   local need_name=0 need_repo=0
   grep -qE '^[[:space:]]*dsh-telegram-channel:[[:space:]]*true[[:space:]]*$' "$ws" || need_name=1
-  grep -q 'dsh-telegram-channel@git+https://github.com/hi-wenw/dsh-telegram-channel.git' "$ws" || need_repo=1
+  grep -q 'dsh-telegram-channel@git+https://github.com/zhang0098/dsh-telegram-channel.git' "$ws" || need_repo=1
   if [[ "$need_name" -eq 0 && "$need_repo" -eq 0 ]]; then
     echo "allowBuilds already present (git repo + package name), skip"
     return
@@ -94,7 +94,7 @@ EOF
 
   local insert=""
   [[ "$need_name" -eq 1 ]] && insert+=$'  dsh-telegram-channel: true\n'
-  [[ "$need_repo" -eq 1 ]] && insert+=$'  '\''dsh-telegram-channel@git+https://github.com/hi-wenw/dsh-telegram-channel.git'\'': true\n'
+  [[ "$need_repo" -eq 1 ]] && insert+=$'  '\''dsh-telegram-channel@git+https://github.com/zhang0098/dsh-telegram-channel.git'\'': true\n'
 
   if grep -q '^allowBuilds:' "$ws"; then
     tmp="$(mktemp)"

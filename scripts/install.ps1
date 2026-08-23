@@ -7,7 +7,7 @@
   dsh-telegram-channel manager menu: install / start / stop / status.
 
 .EXAMPLE
-  irm https://raw.githubusercontent.com/hi-wenw/dsh-telegram-channel/master/scripts/install.ps1 | iex
+  irm https://raw.githubusercontent.com/zhang0098/dsh-telegram-channel/master/scripts/install.ps1 | iex
 
 .EXAMPLE
   .\scripts\install.ps1 -Action start
@@ -20,7 +20,7 @@ param(
   [string] $Token = $env:DSH_TELEGRAM_TOKEN,
   [string] $UserId = $env:DSH_TELEGRAM_ALLOWED_USER_IDS,
   [string] $ProfileName = 'web',
-  [string] $Source = 'github:hi-wenw/dsh-telegram-channel',
+  [string] $Source = 'github:zhang0098/dsh-telegram-channel',
   [int] $Port = 3080,
   [switch] $Local,
   [switch] $NoPersist
@@ -79,7 +79,7 @@ function Get-UserEnv([string] $Name) {
 function Get-AllowBuildsEntries {
   return @(
     '  dsh-telegram-channel: true'
-    "  'dsh-telegram-channel@git+https://github.com/hi-wenw/dsh-telegram-channel.git': true"
+    "  'dsh-telegram-channel@git+https://github.com/zhang0098/dsh-telegram-channel.git': true"
   )
 }
 
@@ -111,7 +111,7 @@ function Ensure-AllowBuilds([string] $ProfileDir) {
     ''
   )
 
-  $repoKeyPresent = $raw -match 'dsh-telegram-channel@git\+https://github\.com/hi-wenw/dsh-telegram-channel\.git'
+  $repoKeyPresent = $raw -match 'dsh-telegram-channel@git\+https://github\.com/zhang0098/dsh-telegram-channel\.git'
   $nameKeyPresent = $raw -match '(?m)^\s*dsh-telegram-channel\s*:\s*true\s*$'
   if ($repoKeyPresent -and $nameKeyPresent) {
     Write-Host 'allowBuilds already present (git repo + package name), skip'
@@ -121,7 +121,7 @@ function Ensure-AllowBuilds([string] $ProfileDir) {
   $toInsert = @()
   if (-not $nameKeyPresent) { $toInsert += '  dsh-telegram-channel: true' }
   if (-not $repoKeyPresent) {
-    $toInsert += "  'dsh-telegram-channel@git+https://github.com/hi-wenw/dsh-telegram-channel.git': true"
+    $toInsert += "  'dsh-telegram-channel@git+https://github.com/zhang0098/dsh-telegram-channel.git': true"
   }
   $insertText = ($toInsert -join "`r`n")
 
