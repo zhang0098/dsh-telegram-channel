@@ -1,211 +1,33 @@
 # dsh-telegram-channel（martty 兼容 fork）
 
-> ## ⚠️ 项目由来
+> **项目由来**：本仓库 fork 自 [hi-wenw/dsh-telegram-channel](https://github.com/hi-wenw/dsh-telegram-channel)（MIT，版权归上游 contributors，见 [LICENSE](LICENSE)）。
 >
-> 本仓库是 **[hi-wenw/dsh-telegram-channel](https://github.com/hi-wenw/dsh-telegram-channel)** 的 **fork**，作者为 **hi-wenw**（MIT 许可证，版权归属见 [LICENSE](LICENSE)）。
+> **fork 原因**：原版在 Martty Host（`dsh --profile martty`）上无法启动——它硬声明 `inject: ['agents', 'apiProxy']`，而 `apiProxy` 只有 web profile（`dsh-host-apiproxy`）提供；Cordis 的 inject 全为必选，fiber 永久 pending，启动报 `1 entry did not activate`（[openma-ai/Martty#46](https://github.com/openma-ai/Martty/issues/46)）。
 >
-> - **上游**：<https://github.com/hi-wenw/dsh-telegram-channel>（`master` 分支）
-> - **fork 原因**：原版在 Martty / dsh-tui Host（`dsh --profile martty`）上无法启动 —— 插件声明 `inject: ['agents', 'apiProxy']`，而 `apiProxy` 服务只有 web profile（`dsh-web-app` 挂载 `dsh-host-apiproxy`）才提供；Cordis 的 inject 全为必选，导致 fiber 永久 pending，启动报 `dsh: 1 entry did not activate`（详见 [openma-ai/Martty#46](https://github.com/openma-ai/Martty/issues/46)）。
-> - **本 fork 的改动**：去掉 `apiProxy` 的 inject（改为运行时探测），`/model` 增加基于 `ctx.llm` + `installModelSelection` 的本地回退；**web profile 行为与上游完全一致**。详见 [与上游的差异](#与上游的差异)。
->
-> 上游修复后本 fork 可同步合并或退役。
+> **差异**：不再 inject `apiProxy`（改运行时探测）；`/model` 无 apiProxy 时回退到 `ctx.llm` + `installModelSelection` 本地路径；依赖对齐 rc.8。**web profile 行为与上游一致**。上游修复后本 fork 可同步或退役。
 
-[English](#english) · [中文](#中文)
+Telegram 手机遥控器 for DeepSeek Harness：附着本机会话，手机 ↔ 电脑同轨迹、双向可见。
 
-![dsh-telegram-channel flow: Desktop → Phone attach → Same trajectory](docs/screenshots/hero-flow.png)
-
-Telegram **手机遥控器** for DeepSeek Harness：附着本机正在跑的会话，与电脑 **同轨迹、双向可见**（Codex-style）。支持 **web** 与 **Martty / dsh-tui** 两种 Host。
-
-**Keywords：** Telegram · Bot · Mobile · Remote · DSH · Cordis · dsh-plugin · sessions · bind · martty
-
----
-
-## 中文
-
-### 支持哪些 Host
-
-| Host | 安装 | 会话目录 | `/model` |
-|---|---|---|---|
-| **web**（`dsh web`） | `dsh plugin --profile web add github:zhang0098/dsh-telegram-channel` | 与 Web 对齐（含冷会话，走 apiProxy RPC） | 走 apiProxy（与 Web 同 API） |
-| **Martty / dsh-tui**（`dsh --profile martty`） | `dsh plugin --profile martty add github:zhang0098/dsh-telegram-channel` | 运行中的本机会话（live agents 回退） | 本地目录（`ctx.llm` 直驱） |
-
-> 想用上游原版？`github:hi-wenw/dsh-telegram-channel` 仍可安装，但**只适用于 web profile**。
-
-### 使用前需要什么
-
-| 需要 | 说明 |
-|---|---|
-| DeepSeek Harness（`dsh`） | 本机已能跑通 `dsh web`，或 Martty TUI（`dsh --profile martty` / `dsh-tui`） |
-| Node.js | 跟 Harness 走，建议 ≥22 |
-| Telegram Bot Token | `@BotFather` → `/newbot` |
-| 数字 User ID | `@userinfobot` |
-| 代理（可选） | 若直连不上 `api.telegram.org`，需本机 HTTP(S)_PROXY |
-
-**不需要 Python。**
-
----
-
-### 与上游的差异
-
-上游 `hi-wenw/dsh-telegram-channel` 按 web harness Host 编写，`apiProxy` 是其硬依赖。本 fork 为兼容 Martty / ACP Host 做了三处改动：
-
-1. **`inject: ['agents']`，不再 inject `apiProxy`** —— 改为运行时 `ctx.get('apiProxy')` 探测。Cordis 的 inject 全为必选：声明一个不存在的服务会把 fiber 永久停在 pending，整个 profile 拒绝启动（原版在 martty 上的症状：`dsh: 1 entry did not activate` / `pending (waiting for service: apiProxy)`）。
-2. **`/model` 本地回退** —— apiProxy 缺席时直接驱动 harness 自身服务：`ctx.llm`（`listProviders` / `listModels` / `resolveModelInfo` / `resolveCallConfig`）+ `installModelSelection`（`@deepseek-ai/dsh-agent` 导出的、web api-proxy 使用的同一个 helper），当前模型读 `session.requestHeader()?.config` 或 `ctx.agentDefaultModel`，切换后尝试写回默认。web profile 上仍走原 apiProxy RPC，行为不变。
-3. **依赖版本对齐 rc.8 基线** —— 与 dsh 0.1.x 发布版本一致；同时移除了上游 devDeps 里指向**未发布包** `@deepseek-ai/dsh-type-meta` 的旧 rc 锁（上游仓库全新安装也会因此失败）。
-
-未改动的部分（与会话绑定、`/last`、消息渲染、安装脚本、配置项）与上游一致。
-
-### 30 秒理解
-
-1. 电脑端打开会话（`dsh web` 或 `dsh-tui`）  
-2. 手机 Bot：`/sessions` → **工作区** → **会话** → 附着  
-3. 之后手机 ↔ 电脑走**同一条**轨迹；可用 `/model` 切换模型（下一回合生效）
-
-> Martty 注意：`/sessions` 只列**当前运行中**的本机会话（上游在无 apiProxy 时同款行为）；在 TUI 里打开过的会话即可见。
-
-### 效果截图
-
-手机选择会话并发问：
-
-![手机 Telegram：选择会话并对话](docs/screenshots/mobile-chat.jpg)
-
-电脑 Web 同步收到同一条消息与回复：
-
-![电脑 DSH Web：同轨迹同步](docs/screenshots/desktop-sync.jpg)
-
----
-
-### 一键管理菜单（推荐）
-
-**先准备两样东西：**
-
-| 准备 | 怎么拿 |
-|---|---|
-| Bot Token | Telegram 搜 `@BotFather` → `/newbot` → 复制 token |
-| 数字 User ID | 搜 `@userinfobot` → Start → 复制纯数字 |
-
-> Token 不要发到公开群；泄露了去 BotFather `/revoke`。
-
-#### Windows
-
-> 请在 **PowerShell** 执行。若当前是 **CMD**，用下面「CMD 一键」那行。
-
-```powershell
-irm https://raw.githubusercontent.com/zhang0098/dsh-telegram-channel/master/scripts/install.ps1 | iex
-```
-
-> 脚本已兼容 `irm | iex`（菜单逻辑包在 scriptblock 里）。CMD 请用下面整行。
-
-**CMD 一键：**
-
-```bat
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/zhang0098/dsh-telegram-channel/master/scripts/install.ps1 | iex"
-```
-
-备用（先下载再执行）：
-
-```bat
-powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr -UseBasicParsing https://raw.githubusercontent.com/zhang0098/dsh-telegram-channel/master/scripts/install.ps1 -OutFile $env:TEMP\dsh-tg.ps1; & $env:TEMP\dsh-tg.ps1"
-```
-
-启动后用**数字**选择：
-
-```
-1) 安装 / 重装插件（写入 Token + 白名单）
-2) 启动 dsh web（新窗口）
-3) 停止 dsh web
-4) 查看状态
-5) 打开浏览器
-0) 退出
-```
-
-也可直接指定动作（不进菜单）：
-
-```powershell
-.\scripts\install.ps1 -Action install -Token '...' -UserId '123456789'
-.\scripts\install.ps1 -Action start
-.\scripts\install.ps1 -Action stop
-.\scripts\install.ps1 -Action status
-```
-
-安装时脚本会：写环境变量、补 `allowBuilds`、执行 `dsh plugin add`（**不会**再 insert 同名 id）。
-
-> 脚本默认安装到 **web** profile。Martty 用户请加 `-ProfileName martty`：
-
-```powershell
-.\scripts\install.ps1 -Action install -Token '...' -UserId '123456789' -ProfileName martty
-```
-
-#### macOS / Linux
+## 安装
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/zhang0098/dsh-telegram-channel/master/scripts/install.sh | bash
-# 同样出现数字菜单；或：
-# ./scripts/install.sh install --token '...' --user-id '...' --profile martty
-# ./scripts/install.sh start|stop|status
-```
-
----
-
-### 手机怎么用
-
-1. 菜单选 **2** 启动 `dsh web`（或自己运行 `dsh web` / `dsh --profile martty`）  
-2. 电脑端打开工作区与会话（归档会话不会出现在手机列表）  
-3. 手机对 Bot：`/start` → `/sessions` → 选工作区 → 选会话 → 聊天  
-4. 需要换模型时：`/model` → 点选（下一回合生效）  
-5. 续接上下文：附着后点 **查看上次对话**，或发 `/last`
-
-输入框旁的 **/** 菜单应有：`start` `sessions` `last` `model` `status` `unbind` `help`。
-
-| 命令 | 作用 |
-|---|---|
-| `/sessions` | 先列工作区，再列该工作区会话（web：与 Web 对齐，排除归档/空白/子代理；martty：运行中的本机会话）；冷会话附着时会自动 resume |
-| `/last` | 查看绑定会话的**上次问答**（附着后也会出现「查看上次对话」按钮） |
-| `/model` | 切换当前绑定会话的模型 |
-| `/status` | 当前绑定 |
-| `/unbind` | 只断开手机，**不关**电脑会话 |
-| `/help` | 帮助 |
-
----
-
-### 手工安装（可选）
-
-若不想跑脚本：
-
-```bash
-# 环境变量
-# DSH_TELEGRAM_TOKEN = BotFather token
-# DSH_TELEGRAM_ALLOWED_USER_IDS = 数字ID
-
-# web profile
+# web profile（完整会话目录，走 apiProxy，同上游）
 dsh plugin --profile web add github:zhang0098/dsh-telegram-channel
-dsh web
 
-# martty profile
+# martty profile（列运行中的本机会话，/model 走本地）
 dsh plugin --profile martty add github:zhang0098/dsh-telegram-channel
-dsh --profile martty
 ```
 
-本地目录安装：
+环境变量（或 config）：`DSH_TELEGRAM_TOKEN`、`DSH_TELEGRAM_ALLOWED_USER_IDS`（数字白名单，可逗号分隔）。
 
-```bash
-dsh plugin --profile web add /path/to/dsh-telegram-channel
-```
+## 使用
 
-需要改 YAML 白名单时，**只能按 id 覆盖**，不要再 `insert` 同名 id：
+- `/sessions` → 选工作区 → 选会话 → 附着；之后手机发文字即进入该会话（与电脑同轨迹）
+- `/last` 查看上次问答；`/model` 切换模型（下一回合生效）；`/status` 查看绑定；`/unbind` 断开（不关电脑会话）；`/help` 帮助
+- martty 下 `/sessions` 只列**运行中**的会话；冷会话需先在 TUI 打开
+- 一键管理脚本：`scripts/install.ps1`（Windows）/ `scripts/install.sh`（Unix），`-ProfileName martty` 指定 profile
 
-```yaml
-- id: dsh-telegram-channel
-  config:
-    token: ""
-    allowedUserIds: [123456789]
-```
-
-示例：`examples/telegram-agent/cordis.patch.example.yml`。
-
----
-
-### 配置
+## 配置
 
 | 键 / 环境变量 | 含义 |
 |---|---|
@@ -214,143 +36,29 @@ dsh plugin --profile web add /path/to/dsh-telegram-channel
 | `allowAllUsers` | `true` 仅调试 |
 | `maxMessageLength` | 默认 4096 |
 | `pollingTimeoutSec` | 默认 30 |
-| `rendering` | `rich`（默认，原生 Rich Message）或 `html`（旧 Markdown→HTML 兼容） |
+| `rendering` | `rich`（默认）或 `html` |
 
-若本机用了 HTTP(S)_PROXY 访问 Telegram，插件会自动走代理（无需再设 `NODE_USE_ENV_PROXY`）。
-
----
-
-### 故障排查
-
-| 现象 | 处理 |
-|---|---|
-| `ERR_PNPM_IGNORED_BUILDS` / allowBuilds | pnpm 11 起：**仅** `dsh-telegram-channel: true` 不够（git 包无效）。在 profile 的 `pnpm-workspace.yaml` 写入仓库级授权后重装：<br>`'dsh-telegram-channel@git+https://github.com/zhang0098/dsh-telegram-channel.git': true`<br>再跑菜单 **1**（新版安装脚本会自动写） |
-| `duplicate loader entry id: dsh-telegram-channel` | 用户 patch **不要 insert** 同名 id；用上面的 `- id:` 覆盖，或只用环境变量白名单 |
-| 手机完全没回复 / ConnectTimeout | 打开本地代理（如 7890），重启 `dsh web` / `dsh --profile martty` |
-| `missing bot token` | 检查环境变量；**新开终端**再启动 |
-| 「无权限」 | User ID 必须是 `@userinfobot` 的数字 |
-| `/sessions` 无会话 | web：确认有未归档会话（空白会话会被隐藏）；martty：先在 TUI 里打开过会话 |
-| `/sessions` 比电脑少很多 | web：检查是否归档；martty：冷会话不在列表中（设计如此，live-agents 回退） |
-| `/model` 不可用 | web：需 `dsh web`（apiProxy）；martty：绑定会话需在运行中。先 `/sessions` 绑定 |
-| `plugin tree failed to load: ... pending (waiting for service: apiProxy)` | 装了**上游原版**到 martty profile；改用本 fork：`dsh plugin --profile martty add github:zhang0098/dsh-telegram-channel` |
-| Telegram 401 | Token 错了或被 revoke |
-
----
-
-### 开发
+## 开发
 
 ```bash
-git clone https://github.com/zhang0098/dsh-telegram-channel.git
-cd dsh-telegram-channel
-pnpm install
-pnpm test        # 单测（含本地 /model 回退测试）
-pnpm run build   # 编译 src → lib
-```
-
-> 注意：上游 devDeps 锁定的旧 rc 引用了未发布的 `@deepseek-ai/dsh-type-meta`，全新安装会失败；本 fork 已把依赖对齐到 rc.8 并改用 pnpm。
-
-### 发布与发现（社区插件）
-
-社区发现入口主要是 GitHub topic，不是封闭应用商店审核：
-
-1. 仓库 **公开**，`package.json` 声明 `dsh.bundle.patch`（本仓库已有）
-2. About → Topics 加上 **`dsh-plugin`**（已加；可浏览 [topic 列表](https://github.com/topics/dsh-plugin)）
-3. 用户安装（见上文 web / martty 两条命令）
-4. 可选：收录到 [awesome-deepseek-harness](https://github.com/0xsline/awesome-deepseek-harness) 等精选列表；可选再发 npm
-
-官方也建议插件作者使用 [`dsh-plugin`](https://github.com/topics/dsh-plugin) topic 方便检索。
-
-### 许可证
-
-[MIT](LICENSE) —— 版权归 **dsh-telegram-channel contributors**（上游作者 hi-wenw 及后续贡献者）。
-
----
-
-## English
-
-### Origin
-
-This repository is a **fork** of [hi-wenw/dsh-telegram-channel](https://github.com/hi-wenw/dsh-telegram-channel) (MIT, copyright notice in [LICENSE](LICENSE)).
-
-**Why the fork:** the upstream plugin hard-injects `apiProxy`, a service only the web profile provides (via `dsh-host-apiproxy`). On the Martty / ACP host (`dsh --profile martty`) Cordis parks the fiber forever — boot fails with `1 entry did not activate` / `pending (waiting for service: apiProxy)` (see [openma-ai/Martty#46](https://github.com/openma-ai/Martty/issues/46)).
-
-**Changes:** drop `apiProxy` from `inject` (probe at runtime via `ctx.get`), add a local `/model` fallback driving `ctx.llm` + `installModelSelection` (the same harness services the web api-proxy wraps), and align dependency versions to the rc.8 baseline. **Behavior on the web profile is unchanged** — the apiProxy RPC path is still used when available.
-
-### Prerequisites
-
-- Working DeepSeek Harness (`dsh web`) **or** Martty TUI (`dsh --profile martty` / `dsh-tui`)
-- Node.js (typically ≥22 with Harness)
-- Telegram bot token + numeric user id
-- Optional HTTP(S)_PROXY if Telegram API is blocked
-- **No Python required**
-
-### Install
-
-```bash
-# web profile (full catalog, apiProxy path — same as upstream)
-dsh plugin --profile web add github:zhang0098/dsh-telegram-channel
-
-# martty profile (live-session catalog, local /model path)
-dsh plugin --profile martty add github:zhang0098/dsh-telegram-channel
-```
-
-### What this is
-
-Telegram **mobile remote** for DeepSeek Harness sessions. Desktop is the source of truth; the phone **attaches** (no parallel hidden agent). `/sessions` is **workspace → session** (web: Web-aligned, archived excluded; martty: currently running local sessions). `/model` switches the bound session's model for the next turn (apiProxy RPC on web, `ctx.llm` directly on martty).
-
-### Screenshots
-
-Phone: pick a session and chat:
-
-![Telegram mobile remote](docs/screenshots/mobile-chat.jpg)
-
-Desktop shows the same trajectory:
-
-![DSH Web synced](docs/screenshots/desktop-sync.jpg)
-
-### One-click manager (Windows)
-
-Run in **PowerShell** (not CMD). Opens a number menu: install / start / stop / status / open browser.
-
-```powershell
-irm https://raw.githubusercontent.com/zhang0098/dsh-telegram-channel/master/scripts/install.ps1 | iex
-```
-
-Direct actions (add `-ProfileName martty` for Martty):
-
-```powershell
-.\scripts\install.ps1 -Action start
-.\scripts\install.ps1 -Action stop
-.\scripts\install.ps1 -Action install -Token '...' -UserId '123456789'
-```
-
-### Unix
-
-```bash
-export DSH_TELEGRAM_TOKEN='...'
-export DSH_TELEGRAM_ALLOWED_USER_IDS='123456789'
-curl -fsSL https://raw.githubusercontent.com/zhang0098/dsh-telegram-channel/master/scripts/install.sh | bash
-# ./scripts/install.sh install --token '...' --user-id '...' --profile martty
-```
-
-### Manual
-
-```bash
-dsh plugin --profile web add github:zhang0098/dsh-telegram-channel
-```
-
-Allowlist via `DSH_TELEGRAM_ALLOWED_USER_IDS` (preferred) or id-targeted YAML override — **never** re-`insert` the same plugin id.
-
-### Development
-
-```bash
-git clone https://github.com/zhang0098/dsh-telegram-channel.git
-cd dsh-telegram-channel
 pnpm install
 pnpm test
 pnpm run build
 ```
 
-### License
+## License
 
-MIT — upstream (hi-wenw) plus fork contributors. See [LICENSE](LICENSE).
+MIT（上游 hi-wenw 及 fork 贡献者）
+
+---
+
+## English (summary)
+
+Fork of [hi-wenw/dsh-telegram-channel](https://github.com/hi-wenw/dsh-telegram-channel) (MIT) to run on the Martty / ACP host (`dsh --profile martty`): the upstream hard-injects `apiProxy`, a web-profile-only service, which parks the Cordis fiber forever (`1 entry did not activate`, see [openma-ai/Martty#46](https://github.com/openma-ai/Martty/issues/46)). This fork probes `apiProxy` at runtime, adds a local `/model` fallback over `ctx.llm`, and keeps web-profile behavior identical.
+
+```bash
+dsh plugin --profile web add github:zhang0098/dsh-telegram-channel
+dsh plugin --profile martty add github:zhang0098/dsh-telegram-channel
+```
+
+Bot commands: `/sessions` (workspace → session → bind), plain text = followup, `/last`, `/model`, `/status`, `/unbind`, `/help`. Env: `DSH_TELEGRAM_TOKEN`, `DSH_TELEGRAM_ALLOWED_USER_IDS`.
