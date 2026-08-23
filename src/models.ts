@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
+import type { Agent } from '@deepseek-ai/dsh-agent'
 import { resolveApiProxy } from './apiproxy.js'
+import { loadSessionModelsLocal, selectSessionModelLocal } from './models-local.js'
 
 export interface ModelOption {
   provider: string
@@ -38,7 +40,23 @@ async function call(fn: ApiFn | undefined, payload: unknown): Promise<unknown> {
   return fn({ rpcId: randomUUID(), payload })
 }
 
-export async function loadSessionModels(ctx: Context, sessionId: string): Promise<ModelSnapshot> {
+export async function loadSessionModels(
+  ctx: Context,
+  sessionId: string,
+  agent?: Agent,
+): Promise<ModelSnapshot> {
+  const api = resolveApiProxy(ctx)
+  if (api?.sessions?.models) {
+    return loadSessionModelsViaApi(ctx, sessionId)
+  }
+  // Host without apiProxy (martty / ACP host): drive ctx.llm directly.
+  if (!agent) {
+    throw new Error('no live agent for local model catalog (resume the session first)')
+  }
+  return loadSessionModelsLocal(ctx, agent)
+}
+
+async function loadSessionModelsViaApi(ctx: Context, sessionId: string): Promise<ModelSnapshot> {
   const api = resolveApiProxy(ctx)
   if (!api?.sessions?.models) {
     throw new Error('apiProxy unavailable (use ctx.get / inject apiProxy)')
@@ -81,6 +99,23 @@ export async function loadSessionModels(ctx: Context, sessionId: string): Promis
 }
 
 export async function selectSessionModel(
+  ctx: Context,
+  sessionId: string,
+  selection: { provider: string; model: string; reasoningEffort?: string },
+  agent?: Agent,
+): Promise<{ provider: string; model: string; reasoningEffort?: string }> {
+  const api = resolveApiProxy(ctx)
+  if (api?.sessions?.selectModel) {
+    return selectSessionModelViaApi(ctx, sessionId, selection)
+  }
+  // Host without apiProxy (martty / ACP host): drive ctx.llm directly.
+  if (!agent) {
+    throw new Error('no live agent for local model selection (resume the session first)')
+  }
+  return selectSessionModelLocal(ctx, agent, selection)
+}
+
+async function selectSessionModelViaApi(
   ctx: Context,
   sessionId: string,
   selection: { provider: string; model: string; reasoningEffort?: string },

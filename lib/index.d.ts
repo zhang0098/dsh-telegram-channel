@@ -1,7 +1,13 @@
 import type { Context } from '@deepseek-ai/cordis';
 import Schema from '@deepseek-ai/schemastery';
 export declare const name = "dsh-telegram-channel";
-/** agents: followup; apiProxy: workspace/session catalog + /model (Cordis requires inject to read ctx.apiProxy). */
+/**
+ * agents: followup + live catalog + local /model.
+ * apiProxy is NOT injected: it only exists on the web host (dsh-web-app mounts
+ * dsh-host-apiproxy). Cordis inject is all-required — declaring it would park
+ * this fiber forever on hosts without it (martty / ACP host, headless). We
+ * probe it at runtime via ctx.get and fall back to ctx.llm / live agents.
+ */
 export declare const inject: string[];
 export interface TelegramChannelConfig {
     token?: string;

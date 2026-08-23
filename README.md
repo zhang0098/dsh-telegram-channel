@@ -6,9 +6,9 @@
 
 Telegram **手机遥控器** for DeepSeek Harness：附着本机正在跑的 Web 会话，与电脑 **同轨迹、双向可见**（Codex-style）。
 
-**发现：** [dsh-plugin topic](https://github.com/topics/dsh-plugin) · 安装：`dsh plugin --profile web add github:hi-wenw/dsh-telegram-channel`
+**发现：** [dsh-plugin topic](https://github.com/topics/dsh-plugin) · 安装（Web）：`dsh plugin --profile web add github:hi-wenw/dsh-telegram-channel` · 安装（Martty / dsh-tui）：`dsh plugin --profile martty add github:zhang0098/dsh-telegram-channel`
 
-**Keywords：** Telegram · Bot · Mobile · Remote · DSH · Cordis · dsh-plugin · sessions · bind
+**Keywords：** Telegram · Bot · Mobile · Remote · DSH · Cordis · dsh-plugin · sessions · bind · martty
 
 ---
 
@@ -18,7 +18,7 @@ Telegram **手机遥控器** for DeepSeek Harness：附着本机正在跑的 Web
 
 | 需要 | 说明 |
 |---|---|
-| DeepSeek Harness（`dsh`） | 本机已能跑通 `dsh web` |
+| DeepSeek Harness（`dsh`） | 本机已能跑通 `dsh web`，或 Martty TUI（`dsh --profile martty` / `dsh-tui`） |
 | Node.js | 跟 Harness 走，建议 ≥22 |
 | Telegram Bot Token | `@BotFather` → `/newbot` |
 | 数字 User ID | `@userinfobot` |
@@ -27,6 +27,16 @@ Telegram **手机遥控器** for DeepSeek Harness：附着本机正在跑的 Web
 **不需要 Python。**
 
 ---
+
+### Martty / dsh-tui 兼容（本 fork 新增）
+
+本 fork（`zhang0098/dsh-telegram-channel`）让插件在 **Martty（`dsh --profile martty` / `dsh-tui`）Host** 上也能启动：
+
+- 原版 `inject: ['agents', 'apiProxy']` 在 martty Host 上永远等不到 `apiProxy`（该服务只有 web profile 挂载 `dsh-host-apiproxy` 才提供），Cordis 会把 fiber 永久停在 pending，导致 `dsh: 1 entry did not activate`。
+- 本 fork **不再 inject `apiProxy`**，改为运行时 `ctx.get('apiProxy')` 探测：
+  - web profile：走原 apiProxy RPC（行为不变，完整会话目录与 Web 对齐）；
+  - martty profile：会话目录回退到**运行中的本机会话**（live agents），`/last` 用 live session 事件，`/model` 直接驱动 `ctx.llm` + `installModelSelection`（与 web host 的 api-proxy 同一套 harness 服务）。
+- 依赖版本对齐到 rc.8（与 dsh 0.1.x 发布基线一致），并移除了上游 devDeps 里指向未发布包的旧 rc 锁。
 
 ### 30 秒理解
 

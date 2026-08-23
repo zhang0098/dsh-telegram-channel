@@ -1,4 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis';
+import type { Agent } from '@deepseek-ai/dsh-agent';
 export interface ModelOption {
     provider: string;
     model: string;
@@ -17,12 +18,12 @@ export interface ModelSnapshot {
     routable: boolean;
     options: ModelOption[];
 }
-export declare function loadSessionModels(ctx: Context, sessionId: string): Promise<ModelSnapshot>;
+export declare function loadSessionModels(ctx: Context, sessionId: string, agent?: Agent): Promise<ModelSnapshot>;
 export declare function selectSessionModel(ctx: Context, sessionId: string, selection: {
     provider: string;
     model: string;
     reasoningEffort?: string;
-}): Promise<{
+}, agent?: Agent): Promise<{
     provider: string;
     model: string;
     reasoningEffort?: string;
