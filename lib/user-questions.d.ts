@@ -75,8 +75,8 @@ export declare class TelegramUserQuestions {
     private readonly patches;
     /** service → original `ask` captured before interposing. */
     private readonly originals;
-    private ctx;
-    private serviceListener;
+    /** Disposer returned by `ctx.on('internal/service')` — Cordis has no `ctx.off`, and touching the ctx proxy during teardown throws. */
+    private removeServiceListener;
     private installed;
     constructor(options: TelegramUserQuestionsOptions);
     /** Interpose `ctx.userQuestions.ask` when the seam exists; no-op otherwise. */

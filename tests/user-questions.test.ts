@@ -87,16 +87,17 @@ test('no bound chat delegates to the original provider', async () => {
 function cordisLikeCtx() {
   const listeners = new Map<string, Array<(...args: unknown[]) => void>>()
   let service: UserQuestionServiceLike | undefined
-  const ctx = {
+  const base = {
     listeners,
     get(name: string) {
       return name === 'userQuestions' ? service : undefined
     },
     on(event: string, listener: (...args: unknown[]) => void) {
-      listeners.set(event, [...(listeners.get(event) ?? []), listener])
-    },
-    off(event: string, listener: (...args: unknown[]) => void) {
-      listeners.set(event, (listeners.get(event) ?? []).filter((l) => l !== listener))
+      const list = listeners.get(event) ?? []
+      listeners.set(event, [...list, listener])
+      return () => {
+        listeners.set(event, (listeners.get(event) ?? []).filter((l) => l !== listener))
+      }
     },
     provideUserQuestions(next: UserQuestionServiceLike) {
       service = next
@@ -105,15 +106,21 @@ function cordisLikeCtx() {
       }
     },
   }
-  // Direct access throws like the Cordis proxy when the service is absent.
-  Object.defineProperty(ctx, 'userQuestions', {
+  // Direct access throws like the Cordis proxy when the service is absent,
+  // and ANY undeclared property read throws (e.g. there is no ctx.off).
+  Object.defineProperty(base, 'userQuestions', {
     get() {
       if (service === undefined) throw new Error('cannot get property "userQuestions" without inject')
       return service
     },
     configurable: true,
   })
-  return ctx as any
+  return new Proxy(base, {
+    get(target, prop) {
+      if (prop in target) return (target as Record<PropertyKey, unknown>)[prop]
+      throw new Error(`cannot get property "${String(prop)}" without inject`)
+    },
+  }) as any
 }
 
 test('install never throws and adopts the service when it appears later', async () => {
@@ -161,6 +168,17 @@ test('a replacement service instance is re-adopted (HMR)', async () => {
   assert.equal(sent.length, 1, 'new instance must be mirrored too')
   bridge.dispose()
   await promise.catch(() => {})
+})
+
+test('dispose during teardown never touches the ctx proxy (no ctx.off crash)', () => {
+  const sent: SentMessage[] = []
+  const ctx = cordisLikeCtx()
+  const bridge = new TelegramUserQuestions({ client: fakeClient(sent), boundChatsFor: () => [10] })
+  bridge.install(ctx)
+  // Cordis has no ctx.off: the proxy throws on any undeclared property read.
+  // dispose must only use the captured on() disposer.
+  bridge.dispose()
+  bridge.dispose() // idempotent
 })
 
 test('dispose restores the original ask on every interposed service', async () => {

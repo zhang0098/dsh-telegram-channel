@@ -113,8 +113,8 @@ export class TelegramUserQuestions {
   private readonly patches = new Map<UserQuestionServiceLike, (request: AskUserQuestionRequest) => Promise<AskUserQuestionAnswer>>()
   /** service → original `ask` captured before interposing. */
   private readonly originals = new Map<UserQuestionServiceLike, (request: AskUserQuestionRequest) => Promise<AskUserQuestionAnswer>>()
-  private ctx: Context | undefined
-  private serviceListener: ((name: string, value?: unknown) => void) | undefined
+  /** Disposer returned by `ctx.on('internal/service')` — Cordis has no `ctx.off`, and touching the ctx proxy during teardown throws. */
+  private removeServiceListener: (() => void) | undefined
   private installed = false
 
   constructor(options: TelegramUserQuestionsOptions) {
@@ -127,7 +127,6 @@ export class TelegramUserQuestions {
   install(ctx: Context): void {
     if (this.installed) return
     this.installed = true
-    this.ctx = ctx
     this.adopt(this.lookupService(ctx))
     // The seam may activate after this plugin or be replaced by HMR — adopt
     // every newly available instance.
@@ -136,9 +135,8 @@ export class TelegramUserQuestions {
         this.adopt(value as UserQuestionServiceLike | undefined)
       }
     }
-    this.serviceListener = listener
     if (typeof (ctx as { on?: unknown }).on === 'function') {
-      ctx.on('internal/service', listener)
+      this.removeServiceListener = ctx.on('internal/service', listener) as (() => void) | undefined
     }
   }
 
@@ -216,15 +214,16 @@ export class TelegramUserQuestions {
    * `ask`, and stop listening for service replacements.
    */
   dispose(): void {
-    if (this.ctx !== undefined && this.serviceListener !== undefined) {
-      const off = (this.ctx as unknown as { off?: (event: string, listener: (name: string, value?: unknown) => void) => void }).off
+    // Cordis event listeners are removed via the `on()` disposer; the ctx
+    // proxy must NOT be touched during teardown (undeclared reads throw).
+    if (typeof this.removeServiceListener === 'function') {
       try {
-        off?.('internal/service', this.serviceListener)
+        this.removeServiceListener()
       } catch {
         // context already disposing
       }
     }
-    this.serviceListener = undefined
+    this.removeServiceListener = undefined
     this.installed = false
     // Restore the original ask so a reloaded host keeps working without us.
     for (const [service, original] of this.originals) {
