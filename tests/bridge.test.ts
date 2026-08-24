@@ -26,6 +26,11 @@ function fakeClient(
     },
     sendChatAction: async () => true,
     answerCallbackQuery: async () => true,
+    editMessageReplyMarkup: async () => true,
+    sendRichMessage: async (chatId, markdown) => {
+      sent.push({ chatId, text: markdown, parseMode: 'rich' })
+      return { message_id: 1, date: 0, chat: { id: chatId, type: 'private' }, text: markdown }
+    },
     setMyCommands: async () => true,
     ...overrides,
   }

@@ -72,6 +72,11 @@ export interface TelegramClientLike {
   sendRichMessage(chatId: number, markdown: string): Promise<TelegramMessage>
   sendChatAction(chatId: number, action: string): Promise<boolean>
   answerCallbackQuery(callbackQueryId: string, text?: string): Promise<boolean>
+  editMessageReplyMarkup(
+    chatId: number,
+    messageId: number,
+    replyMarkup: InlineKeyboardMarkup,
+  ): Promise<boolean>
   setMyCommands(commands: TelegramBotCommand[]): Promise<boolean>
   /** Abort any in-flight requests (long polling must not block teardown). */
   abort?(): void
@@ -201,6 +206,18 @@ export class TelegramClient implements TelegramClientLike {
     const body: Record<string, unknown> = { callback_query_id: callbackQueryId }
     if (text !== undefined) body.text = text
     return this.call<boolean>('answerCallbackQuery', body)
+  }
+
+  async editMessageReplyMarkup(
+    chatId: number,
+    messageId: number,
+    replyMarkup: InlineKeyboardMarkup,
+  ): Promise<boolean> {
+    return this.call<boolean>('editMessageReplyMarkup', {
+      chat_id: chatId,
+      message_id: messageId,
+      reply_markup: replyMarkup,
+    })
   }
 
   async setMyCommands(commands: TelegramBotCommand[]): Promise<boolean> {

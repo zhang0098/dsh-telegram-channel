@@ -25,6 +25,7 @@ import { markdownToHtml, splitMessage } from './format.js'
 import { splitRichMarkdown } from './rich-format.js'
 import { formatLastTurn, loadLastTurn } from './history.js'
 import { describeAgent, displayLabel } from './label.js'
+import { TelegramUserQuestions } from './user-questions.js'
 import {
   formatModel,
   loadSessionModels,
@@ -99,6 +100,7 @@ export class TelegramBridge {
   private readonly client: TelegramClientLike
   private readonly sleep: (ms: number) => Promise<void>
   private readonly maxMessageLength: number
+  private readonly userQuestions: TelegramUserQuestions
   private renderingMode: 'rich' | 'html'
 
   private readonly bindings = new Map<string, Binding>()
@@ -122,9 +124,20 @@ export class TelegramBridge {
     this.sleep = options.sleep ?? defaultSleep
     this.maxMessageLength = options.maxMessageLength ?? 4096
     this.renderingMode = options.rendering === 'html' ? 'html' : 'rich'
+    this.userQuestions = new TelegramUserQuestions({
+      client: this.client,
+      boundChatsFor: (sessionId) =>
+        [...this.bindings.values()]
+          .filter((b) => b.sessionId === sessionId)
+          .map((b) => b.chatId),
+      logger: this.ctx.logger,
+    })
   }
 
   start(): void {
+    // Mirror host-side user-question dialogs (ask_user_question / plan review)
+    // to a bound Telegram chat; no-op when the seam is absent.
+    this.userQuestions.install(this.ctx)
     this.disposeSessionListener?.()
     this.disposeSessionListener = this.ctx.on('session/event', (session, event) => {
       void this.onSessionEvent(session, event).catch((err) => {
@@ -159,6 +172,8 @@ export class TelegramBridge {
     // Abort in-flight Telegram requests first: getUpdates is a long poll
     // (up to pollingTimeoutSec) and must not block teardown.
     this.client.abort?.()
+    // Reject pending user questions so the agent loop never blocks on the phone.
+    this.userQuestions.dispose()
     this.disposeSessionListener?.()
     this.disposeSessionListener = undefined
     // Never dispose host agents — only clear remote bindings.
@@ -236,6 +251,10 @@ export class TelegramBridge {
     }
     const data = cq.data ?? ''
     const picker = this.pickers.get(String(chatId))
+
+    if (await this.userQuestions.handleCallback(data, chatId, cq.id)) {
+      return
+    }
 
     if (data === LAST_CB) {
       await this.client.answerCallbackQuery(cq.id)

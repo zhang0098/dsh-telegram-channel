@@ -18,6 +18,7 @@ export declare class TelegramBridge {
     private readonly client;
     private readonly sleep;
     private readonly maxMessageLength;
+    private readonly userQuestions;
     private renderingMode;
     private readonly bindings;
     private readonly pickers;
