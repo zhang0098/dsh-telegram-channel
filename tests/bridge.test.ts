@@ -645,3 +645,40 @@ test('/unbind clears binding without needing create/dispose', async () => {
   assert.equal(sent.at(-1)?.text, MSG.NEED_BIND)
   assert.equal(followups.length, 0)
 })
+
+test('stop() aborts in-flight long polling instead of waiting for it', async () => {
+  const sent: SentMessage[] = []
+  let release: (() => void) | undefined
+  const pending: Promise<never>[] = []
+  const abortableClient: TelegramClientLike = {
+    ...fakeClient(sent),
+    getUpdates: () => new Promise<never>((_resolve, reject) => {
+      pending.push(Promise.reject.bind(Promise))
+      // Simulate a Telegram long poll: stays pending until aborted.
+      void _resolve
+      ;(async () => {
+        await new Promise<void>((r) => { release = r })
+        reject(new Error('aborted'))
+      })()
+    }),
+    abort: () => release?.(),
+  }
+  const ctx = {
+    on: () => () => {},
+    logger: { info() {}, error() {}, warn() {} },
+  }
+  const bridge = new TelegramBridge(ctx as any, {
+    token: 't',
+    allowedUserIds: [1],
+    allowAllUsers: false,
+    client: abortableClient,
+    sleep: async () => {},
+  })
+  bridge.start()
+  // Let the polling loop reach the in-flight getUpdates.
+  await new Promise((r) => setTimeout(r, 20))
+  const t0 = Date.now()
+  await bridge.stop()
+  const elapsed = Date.now() - t0
+  assert.ok(elapsed < 2000, `stop() took ${elapsed}ms — long poll was not aborted`)
+})

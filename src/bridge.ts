@@ -156,6 +156,9 @@ export class TelegramBridge {
     this.polling = false
     this.pollAbort?.abort()
     this.pollAbort = undefined
+    // Abort in-flight Telegram requests first: getUpdates is a long poll
+    // (up to pollingTimeoutSec) and must not block teardown.
+    this.client.abort?.()
     this.disposeSessionListener?.()
     this.disposeSessionListener = undefined
     // Never dispose host agents — only clear remote bindings.

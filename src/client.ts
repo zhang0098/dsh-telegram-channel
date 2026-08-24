@@ -73,6 +73,8 @@ export interface TelegramClientLike {
   sendChatAction(chatId: number, action: string): Promise<boolean>
   answerCallbackQuery(callbackQueryId: string, text?: string): Promise<boolean>
   setMyCommands(commands: TelegramBotCommand[]): Promise<boolean>
+  /** Abort any in-flight requests (long polling must not block teardown). */
+  abort?(): void
 }
 
 function resolveProxyUrl(): string | undefined {
@@ -105,6 +107,7 @@ export class TelegramClient implements TelegramClientLike {
   private readonly fetchImpl: typeof fetch
   private readonly baseUrl: string
   private readonly pollingTimeoutSec: number
+  private readonly abortController = new AbortController()
 
   constructor(token: string, options: TelegramClientOptions = {}) {
     if (!token) {
@@ -120,12 +123,18 @@ export class TelegramClient implements TelegramClientLike {
     return message.split(this.token).join('***')
   }
 
+  /** Abort all in-flight requests. Subsequent calls fail fast until replaced. */
+  abort(): void {
+    this.abortController.abort()
+  }
+
   private async call<T>(method: string, body?: Record<string, unknown>): Promise<T> {
     const url = `${this.baseUrl}/bot${this.token}/${method}`
     try {
       const init: RequestInit = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: this.abortController.signal,
       }
       if (body !== undefined) {
         init.body = JSON.stringify(body)

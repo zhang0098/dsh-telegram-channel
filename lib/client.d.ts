@@ -56,14 +56,19 @@ export interface TelegramClientLike {
     sendChatAction(chatId: number, action: string): Promise<boolean>;
     answerCallbackQuery(callbackQueryId: string, text?: string): Promise<boolean>;
     setMyCommands(commands: TelegramBotCommand[]): Promise<boolean>;
+    /** Abort any in-flight requests (long polling must not block teardown). */
+    abort?(): void;
 }
 export declare class TelegramClient implements TelegramClientLike {
     private readonly token;
     private readonly fetchImpl;
     private readonly baseUrl;
     private readonly pollingTimeoutSec;
+    private readonly abortController;
     constructor(token: string, options?: TelegramClientOptions);
     private redact;
+    /** Abort all in-flight requests. Subsequent calls fail fast until replaced. */
+    abort(): void;
     private call;
     getMe(): Promise<TelegramUser>;
     getUpdates(offset?: number): Promise<TelegramUpdate[]>;
