@@ -81,6 +81,27 @@ interface PendingQuestion {
 
 const messageKey = (chatId: number, questionIndex: number) => `${chatId}:${questionIndex}`
 
+/** Error codes that mean "this UI channel cannot show the question at all". */
+const CHANNEL_UNAVAILABLE_CODES = new Set([
+  'DELIVERY_FAILED',
+  'NO_BOUND_CHAT',
+  'TRANSPORT_CLOSED',
+  'FATAL',
+  'NOT_STARTED',
+])
+
+/**
+ * A channel failure (nothing rendered) is recoverable via the other
+ * channel; a deliberate cancellation (ASK_CANCELLED / ASK_ABORTED) is not.
+ * Plain errors without a stable code (e.g. a host UI that failed to open)
+ * count as channel failures.
+ */
+function isChannelUnavailable(err: Error): boolean {
+  const code = (err as { code?: unknown }).code
+  if (code === undefined) return true
+  return CHANNEL_UNAVAILABLE_CODES.has(String(code))
+}
+
 export interface TelegramUserQuestionsOptions {
   client: TelegramClientLike
   /** Bound Telegram chat ids for a live session id, in binding order. */
@@ -273,7 +294,7 @@ export class TelegramUserQuestions {
       const sessionId = request.agent === undefined ? undefined : String(request.agent.id)
       const chats = sessionId === undefined ? [] : this.boundChatsFor(sessionId)
       if (chats.length === 0 || request.questions.length === 0) return original(request)
-      return this.askViaTelegram(chats, request, original)
+      return this.mirrorAsk(chats, request, original)
     }
     this.patches.set(service, interposedFn)
     this.originals.set(service, original)
@@ -287,10 +308,56 @@ export class TelegramUserQuestions {
     return this.patches.has(service)
   }
 
+  /**
+   * Mirror the ask: render the questions in Telegram AND the host UI
+   * (TUI/Web) in parallel; the first channel to answer wins.
+   *
+   * - Telegram answers first → the host dialog stays open until the agent
+   *   turn aborts it (same signal), then it is torn down normally.
+   * - Host UI answers first → the Telegram keyboards are explicitly cleared
+   *   via the abort signal (settle clears every delivered keyboard).
+   * - A channel that is unavailable (delivery failed / no bound chat /
+   *   transport down / host UI missing) falls back to the other channel.
+   * - Cancellation (ASK_CANCELLED / ASK_ABORTED) is not a channel failure:
+   *   it propagates immediately.
+   */
+  private async mirrorAsk(
+    chats: number[],
+    request: AskUserQuestionRequest,
+    original: (request: AskUserQuestionRequest) => Promise<AskUserQuestionAnswer>,
+  ): Promise<AskUserQuestionAnswer> {
+    const tgAbort = new AbortController()
+    const signals: AbortSignal[] = [tgAbort.signal]
+    if (request.signal) signals.push(request.signal)
+    const combinedSignal = AbortSignal.any(signals)
+
+    const telegram = this.askViaTelegram(chats, { ...request, signal: combinedSignal })
+      .then((answer) => ({ channel: 'telegram' as const, answer }))
+      .catch((err) => ({ channel: 'telegram' as const, err: err as Error }))
+    const tui = original(request)
+      .then((answer) => ({ channel: 'tui' as const, answer }))
+      .catch((err) => ({ channel: 'tui' as const, err: err as Error }))
+
+    const first = await Promise.race([telegram, tui])
+    if ('answer' in first) {
+      if (first.channel === 'tui') {
+        // The Telegram keyboards must not linger once the host UI answered.
+        tgAbort.abort()
+      }
+      return first.answer
+    }
+    if (isChannelUnavailable(first.err)) {
+      const other = first.channel === 'telegram' ? await tui : await telegram
+      if ('answer' in other) return other.answer
+      throw other.err
+    }
+    throw first.err
+  }
+
   private async askViaTelegram(
     chats: number[],
     request: AskUserQuestionRequest,
-    fallback: (request: AskUserQuestionRequest) => Promise<AskUserQuestionAnswer>,
+    fallback?: (request: AskUserQuestionRequest) => Promise<AskUserQuestionAnswer>,
   ): Promise<AskUserQuestionAnswer> {
     const nonce = randomUUID()
     const pending: PendingQuestion = {
@@ -331,9 +398,13 @@ export class TelegramUserQuestions {
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err))
       this.settle(pending, undefined, error)
-      // Nothing reached Telegram (bot blocked, network down): hand the ask
-      // back to the host UI instead of failing the tool without a dialog.
-      if (pending.messages.size === 0) return fallback(request)
+      // Nothing reached Telegram (bot blocked, network down): with no
+      // fallback provided the caller (mirrorAsk) decides whether to hand
+      // the ask to the host UI.
+      if (pending.messages.size === 0) {
+        if (fallback === undefined) throw error
+        return fallback(request)
+      }
       throw error
     }
     return promise

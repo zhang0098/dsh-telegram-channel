@@ -23,6 +23,7 @@ dsh plugin --profile martty add github:zhang0098/dsh-telegram-channel
 ## 使用
 
 - `/sessions` → 选工作区 → 选会话 → 附着；之后手机发文字即进入该会话（与电脑同轨迹）
+- 宿主询问（ask_user_question / plan review）**双渠道镜像**：绑定后问题同时出现在 Telegram 与电脑 TUI/Web，任一渠道回答即生效（先答者胜）
 - `/last` 查看上次问答；`/model` 切换模型（下一回合生效）；`/status` 查看绑定；`/unbind` 断开（不关电脑会话）；`/help` 帮助
 - martty 下 `/sessions` 只列**运行中**的会话；冷会话需先在 TUI 打开
 - 一键管理脚本：`scripts/install.ps1`（Windows）/ `scripts/install.sh`（Unix），`-ProfileName martty` 指定 profile

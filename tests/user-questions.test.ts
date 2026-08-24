@@ -3,6 +3,8 @@ import test from 'node:test'
 import type { InlineKeyboardMarkup, TelegramClientLike } from '../src/client.ts'
 import {
   TelegramUserQuestions,
+  userQuestionError,
+  type AskUserQuestionAnswer,
   type AskUserQuestionRequest,
   type UserQuestionServiceLike,
 } from '../src/user-questions.ts'
@@ -53,7 +55,16 @@ function callbackDataOf(message: SentMessage | undefined, row: number): string {
   return message!.replyMarkup!.inline_keyboard[row]![0]!.callback_data
 }
 
-function installWith(fake: TelegramClientLike, bound: string[]) {
+/**
+ * Host-UI (original provider) behavior for the mirror path:
+ * - default: the host dialog stays open (pending) so Telegram answers win —
+ *   this mirrors a real TUI waiting for the user
+ * - `'answer'`: the host UI answers immediately (TUI-first scenarios)
+ * - a function: full control (e.g. throw without a code = UI unavailable)
+ */
+type TuiBehavior = 'pending' | AskUserQuestionAnswer | ((request: AskUserQuestionRequest) => Promise<AskUserQuestionAnswer>)
+
+function installWith(fake: TelegramClientLike, bound: string[], tui: TuiBehavior = 'pending') {
   const service: UserQuestionServiceLike = {
     ask: async () => ({ answers: [] }),
   }
@@ -62,6 +73,15 @@ function installWith(fake: TelegramClientLike, bound: string[]) {
   service.ask = async (request) => {
     delegated += 1
     return original(request)
+  }
+  const tuiAsk = (request: AskUserQuestionRequest): Promise<AskUserQuestionAnswer> => {
+    if (tui === 'pending') return new Promise<AskUserQuestionAnswer>(() => {})
+    if (typeof tui === 'function') return tui(request)
+    return Promise.resolve(tui)
+  }
+  service.ask = async (request) => {
+    delegated += 1
+    return tuiAsk(request)
   }
   const bridge = new TelegramUserQuestions({
     client: fake,
@@ -73,7 +93,7 @@ function installWith(fake: TelegramClientLike, bound: string[]) {
 
 test('no bound chat delegates to the original provider', async () => {
   const sent: SentMessage[] = []
-  const { bridge, service, delegated } = installWith(fakeClient(sent), [])
+  const { bridge, service, delegated } = installWith(fakeClient(sent), [], { answers: [] })
   const answer = await service.ask(requestWith([
     { id: 'q1', question: '继续？', options: [{ label: '是' }, { label: '否' }] },
   ]))
@@ -183,7 +203,7 @@ test('dispose during teardown never touches the ctx proxy (no ctx.off crash)', (
 
 test('dispose restores the original ask on every interposed service', async () => {
   const sent: SentMessage[] = []
-  const { bridge, service, delegated } = installWith(fakeClient(sent), ['sess-1'])
+  const { bridge, service, delegated } = installWith(fakeClient(sent), ['sess-1'], { answers: [] })
   bridge.dispose()
   const answer = await service.ask(requestWith([
     { id: 'q1', question: '恢复后', options: [{ label: '是' }] },
@@ -200,13 +220,64 @@ test('send failure with nothing delivered falls back to the original provider', 
   failing.sendMessage = async () => {
     throw new Error('Telegram API unavailable')
   }
-  const { bridge, service, delegated } = installWith(failing, ['sess-1'])
+  const { bridge, service, delegated } = installWith(failing, ['sess-1'], { answers: [] })
   const answer = await service.ask(requestWith([
     { id: 'q1', question: '继续？', options: [{ label: '是' }] },
   ]))
   assert.deepEqual(answer, { answers: [] }, 'host UI answers instead')
   assert.equal(delegated(), 1)
   assert.equal(sent.length, 0)
+  bridge.dispose()
+})
+
+test('host UI answers first wins and clears the Telegram keyboards', async () => {
+  const sent: SentMessage[] = []
+  const edited: { chatId: number; messageId: number }[] = []
+  const fake = fakeClient(sent, edited)
+  // Telegram renders, but the host UI answers immediately → the Telegram
+  // keyboards must be cleared via the abort path.
+  const { bridge, service, delegated } = installWith(fake, ['sess-1'], { answers: [{ id: 'q1', selected: ['TUI'] }] })
+  const answer = await service.ask(requestWith([
+    { id: 'q1', question: '继续？', options: [{ label: '是' }, { label: '否' }] },
+  ]))
+  assert.deepEqual(answer, { answers: [{ id: 'q1', selected: ['TUI'] }] })
+  assert.equal(delegated(), 1, 'host UI was asked in parallel')
+  assert.equal(sent.length, 1, 'Telegram mirror still rendered')
+  assert.ok(edited.length >= 1, 'Telegram keyboards cleared after the TUI answer')
+  bridge.dispose()
+})
+
+test('host UI unavailable falls back to the Telegram answer', async () => {
+  const sent: SentMessage[] = []
+  const { bridge, service, delegated } = installWith(
+    fakeClient(sent),
+    ['sess-1'],
+    async () => { throw new Error('no UI provider on this host') },
+  )
+  const promise = service.ask(requestWith([
+    { id: 'q1', question: '继续？', options: [{ label: '是' }, { label: '否' }] },
+  ]))
+  assert.equal(sent.length, 1, 'Telegram rendered even though the host UI failed')
+  const tap = callbackDataOf(sent[0], 0)
+  assert.equal(await bridge.handleCallback(tap, 10, 'cb-1'), true)
+  const answer = await promise
+  assert.deepEqual(answer, { answers: [{ id: 'q1', selected: ['是'] }] })
+  assert.equal(delegated(), 1)
+  bridge.dispose()
+})
+
+test('host UI cancellation propagates without waiting for Telegram', async () => {
+  const sent: SentMessage[] = []
+  const { bridge, service, delegated } = installWith(
+    fakeClient(sent),
+    ['sess-1'],
+    async () => { throw userQuestionError('cancelled on the host', 'ASK_CANCELLED') },
+  )
+  await assert.rejects(
+    service.ask(requestWith([{ id: 'q1', question: '继续？', options: [{ label: '是' }] }])),
+    (err: Error & { code?: string }) => err.code === 'ASK_CANCELLED',
+  )
+  assert.equal(delegated(), 1)
   bridge.dispose()
 })
 
@@ -229,7 +300,10 @@ test('question is delivered to every bound chat and answerable from any of them'
     client: fakeClient(sent),
     boundChatsFor: () => [10, 20],
   })
-  const service: UserQuestionServiceLike = { ask: async () => ({ answers: [] }) }
+  // The host UI (original provider) stays open; Telegram answers win.
+  const service: UserQuestionServiceLike = {
+    ask: () => new Promise<AskUserQuestionAnswer>(() => {}),
+  }
   bridge.install({ userQuestions: service } as any)
 
   const promise = service.ask(requestWith([

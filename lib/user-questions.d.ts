@@ -94,6 +94,20 @@ export declare class TelegramUserQuestions {
     private lookupService;
     private adopt;
     private interposed;
+    /**
+     * Mirror the ask: render the questions in Telegram AND the host UI
+     * (TUI/Web) in parallel; the first channel to answer wins.
+     *
+     * - Telegram answers first → the host dialog stays open until the agent
+     *   turn aborts it (same signal), then it is torn down normally.
+     * - Host UI answers first → the Telegram keyboards are explicitly cleared
+     *   via the abort signal (settle clears every delivered keyboard).
+     * - A channel that is unavailable (delivery failed / no bound chat /
+     *   transport down / host UI missing) falls back to the other channel.
+     * - Cancellation (ASK_CANCELLED / ASK_ABORTED) is not a channel failure:
+     *   it propagates immediately.
+     */
+    private mirrorAsk;
     private askViaTelegram;
     /** Record an answer for one question; resolve the whole request when all are in. */
     private answerQuestion;

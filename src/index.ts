@@ -1,6 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
 import { TelegramBridge } from './bridge.js'
+import { TelegramClient } from './client.js'
 
 export const name = 'dsh-telegram-channel'
 /**
@@ -53,6 +54,7 @@ export function apply(ctx: Context, config: TelegramChannelConfig): void {
     )
     return
   }
+  const baseUrl = process.env.DSH_TELEGRAM_BASE_URL || undefined
   const bridge = new TelegramBridge(ctx, {
     token,
     allowedUserIds: resolveAllowedUserIds(config),
@@ -60,6 +62,7 @@ export function apply(ctx: Context, config: TelegramChannelConfig): void {
     maxMessageLength: config.maxMessageLength ?? 4096,
     pollingTimeoutSec: config.pollingTimeoutSec ?? 30,
     rendering: config.rendering === 'html' ? 'html' : 'rich',
+    ...(baseUrl ? { client: new TelegramClient(token, { baseUrl }) } : {}),
   })
   ctx.effect(() => {
     bridge.start()
